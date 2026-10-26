@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://doedu-russia.ru/sitemap.xml
