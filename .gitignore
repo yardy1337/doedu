@@ -1,0 +1,5 @@
+node_modules/
+worker/dist/
+worker/scripts/raw/
+.wrangler/
+.dev.vars

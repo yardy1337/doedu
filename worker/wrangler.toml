@@ -1,0 +1,9 @@
+# Cloudflare Worker «doedu-api» — API поиска маршрутов «Доеду».
+# Деплой: npx wrangler deploy  (секреты задаются отдельно: npx wrangler secret put YANDEX_KEY и т.д.)
+name = "doedu-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+[vars]
+TP_MARKER = "795764"

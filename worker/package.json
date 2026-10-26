@@ -1,0 +1,12 @@
+{
+  "name": "doedu-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=dist/worker.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0",
+    "undici": "6.21.0"
+  }
+}
