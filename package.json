@@ -8,7 +8,11 @@
     "audio": "tsx scripts/generate-audio.ts",
     "render:vertical": "remotion render Ep1Vertical out/doedu-ep1-vertical.mp4",
     "render": "npm run render:vertical",
-    "stills": "node scripts/stills.mjs"
+    "stills": "node scripts/stills.mjs",
+    "audio:ep2": "tsx scripts/generate-audio.ts --ep=ep2",
+    "render:ep2:vertical": "remotion render Ep2Vertical out/doedu-ep2-vertical.mp4",
+    "render:ep2:horizontal": "remotion render Ep2Horizontal out/doedu-ep2-horizontal.mp4",
+    "render:ep2": "npm run render:ep2:vertical && npm run render:ep2:horizontal"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.6",
