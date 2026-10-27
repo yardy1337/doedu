@@ -590,7 +590,16 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
     if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405, origin);
 
-    if (url.pathname === '/api/health') return json({ ok: true, prices: Boolean(env.TP_TOKEN) }, 200, origin);
+    if (url.pathname === '/api/health') {
+      // ?pad — ~48 КБ несжимаемых данных: сайт по скорости их загрузки выбирает адрес API,
+      // который не замедляют (короткий ответ проходит даже через замедленный канал).
+      if (!url.searchParams.has('pad')) return json({ ok: true, prices: Boolean(env.TP_TOKEN) }, 200, origin);
+      const bytes = new Uint8Array(36000);
+      crypto.getRandomValues(bytes);
+      let pad = '';
+      for (let i = 0; i < bytes.length; i += 8192) pad += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      return json({ ok: true, pad: btoa(pad) }, 200, origin, { 'Cache-Control': 'no-store' });
+    }
 
     if (url.pathname === '/api/search') {
       const key = url.pathname + url.search;

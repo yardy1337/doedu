@@ -23,9 +23,12 @@ const env = {
 export async function handler(event: YcEvent) {
   const headers = new Headers();
   for (const [k, v] of Object.entries(event.headers ?? {})) headers.set(k, v);
-  // путь приходит от API Gateway (/api/search) или из параметра функции
-  const path = event.path && event.path !== '/' ? event.path : (event.params?.path ?? '/api/search');
-  const qs = new URLSearchParams(event.queryStringParameters ?? {}).toString();
+  // Путь: из API Gateway (/api/search) или из параметра ?path= при прямом вызове функции
+  // (https://functions.yandexcloud.net/<id>?path=/api/search&from=…).
+  const query = { ...(event.queryStringParameters ?? {}) };
+  const path = query.path ?? (event.path && event.path !== '/' ? event.path : '/api/search');
+  delete query.path;
+  const qs = new URLSearchParams(query).toString();
   const request = new Request(`https://api.doedu-russia.ru${path}${qs ? `?${qs}` : ''}`, { method: event.httpMethod, headers });
   const res = await worker.fetch(request, env);
   const out: Record<string, string> = {};
