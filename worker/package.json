@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=dist/worker.js",
-    "build:yandex": "esbuild yandex/handler.ts --bundle --format=cjs --platform=node --target=node18 --outfile=dist-yandex/index.js"
+    "build:yandex": "esbuild yandex/handler.ts --bundle --format=cjs --platform=node --target=node18 --external:ydb-sdk --outfile=dist-yandex/index.js && node yandex/pack.mjs"
   },
   "devDependencies": {
     "esbuild": "0.24.0",
