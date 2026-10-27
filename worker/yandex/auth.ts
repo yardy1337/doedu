@@ -366,7 +366,8 @@ export async function handleAccount(
     }
     if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new HttpError(400, 'Некорректный запрос.');
   }
-  const auth = headers.authorization;
+  // токен — в X-Auth-Token: заголовок Authorization Yandex Cloud забирает себе (проверка IAM) и отвечает 403
+  const auth = headers['x-auth-token'] ? `Bearer ${headers['x-auth-token']}` : headers.authorization;
   // публичные: объявление на сайте и анонимный счётчик поисков; кабинет основателя — /api/admin/*
   const extra = await handleAdmin(method, path, query, body, auth, ip);
   if (extra) return extra;

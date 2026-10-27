@@ -25,7 +25,7 @@ function accountCors(origin: string | undefined): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Auth-Token',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
