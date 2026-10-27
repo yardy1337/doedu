@@ -108,21 +108,46 @@ export async function putSetting(k: string, v: string) {
 }
 
 // ─── Telegram ───────────────────────────────────────────────────────────────
+// Из Yandex Cloud api.telegram.org часто недоступен — тогда шлём через Cloudflare Worker (тот же общий секрет).
+const RELAY_URL = 'https://doedu-api.doedu.workers.dev/api/relay/telegram';
+let directBroken = false;
+
 async function tg(method: string, body: Record<string, unknown>, token?: string) {
   const t = token ?? (await getKey('TG_BOT_TOKEN'));
   if (!t) throw new HttpError(400, 'Сначала сохраните токен бота.');
-  let res: Response;
-  try {
-    res = await fetch(`https://api.telegram.org/bot${t}/${method}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(8000),
-    });
-  } catch (e) {
-    const err = e as Error & { cause?: { code?: string; message?: string } };
-    const why = err.name === 'TimeoutError' ? 'нет ответа за 8 с' : err.cause?.code || err.cause?.message || err.message;
-    throw new HttpError(502, `Нет связи с Telegram из Yandex Cloud (${String(why).replace(t, '<токен>').slice(0, 120)}).`);
+  let res: Response | null = null;
+  let why = '';
+  if (!directBroken) {
+    try {
+      res = await fetch(`https://api.telegram.org/bot${t}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch (e) {
+      directBroken = true;
+      const err = e as Error & { cause?: { code?: string } };
+      why = err.name === 'TimeoutError' ? 'нет ответа' : err.cause?.code || err.message;
+    }
+  }
+  if (!res) {
+    const secret = await getKey('INTERNAL_SECRET');
+    if (!secret) {
+      throw new HttpError(502, 'Из Yandex Cloud нет связи с Telegram — сообщения идут через Cloudflare. Сначала подключите «Связь с Cloudflare» ниже.');
+    }
+    try {
+      res = await fetch(RELAY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Internal-Key': secret },
+        body: JSON.stringify({ token: t, method, payload: body }),
+        signal: AbortSignal.timeout(6000),
+      });
+    } catch (e) {
+      const err = e as Error;
+      throw new HttpError(502, `Нет связи с Telegram ни напрямую (${why || 'отключено'}), ни через Cloudflare (${err.name === 'TimeoutError' ? 'нет ответа' : err.message}).`);
+    }
+    if (res.status === 404) throw new HttpError(502, 'Cloudflare не принял секрет связи: проверьте, что INTERNAL_SECRET в Cloudflare совпадает с созданным в кабинете.');
   }
   const data = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: unknown };
   if (!data.ok) throw new HttpError(400, `Telegram: ${String(data.description ?? res.status).replace(t, '<токен>')}`);

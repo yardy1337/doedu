@@ -610,6 +610,29 @@ async function handleSearch(url: URL, env: Env): Promise<{ status: number; body:
   };
 }
 
+// ─── Пересылка в Telegram ────────────────────────────────────────────────────
+function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function telegramRelay(request: Request, env: Env): Promise<Response> {
+  const given = request.headers.get('X-Internal-Key') ?? '';
+  if (!env.INTERNAL_SECRET || !sameSecret(given, env.INTERNAL_SECRET)) return new Response('Not found', { status: 404 });
+  const { token, method, payload } = (await request.json().catch(() => ({}))) as { token?: string; method?: string; payload?: unknown };
+  if (!token || !/^\d{5,15}:[A-Za-z0-9_-]{30,60}$/.test(token) || !['sendMessage', 'getUpdates'].includes(method ?? '')) {
+    return new Response(JSON.stringify({ ok: false, description: 'bad relay request' }), { status: 400 });
+  }
+  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload ?? {}),
+  });
+  return new Response(await res.text(), { status: res.status, headers: { 'Content-Type': 'application/json' } });
+}
+
 // ─── Ключи из кабинета основателя ────────────────────────────────────────────
 // Кабинет хранит ключи в Yandex Cloud; Worker забирает их раз в 5 минут по общему секрету.
 // Не получилось — работаем на секретах самого Worker.
@@ -649,6 +672,8 @@ export default {
     const url = new URL(request.url);
     const origin = request.headers.get('Origin');
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    // Пересылка в Telegram для функции Yandex Cloud: оттуда api.telegram.org недоступен
+    if (url.pathname === '/api/relay/telegram' && request.method === 'POST') return telegramRelay(request, env);
     if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405, origin);
 
     if (url.pathname === '/api/health') {
