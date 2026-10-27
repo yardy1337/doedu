@@ -4,7 +4,7 @@
 // Зачем: Cloudflare в России замедляют, а Yandex Cloud доступен и из России, и из-за рубежа (в том числе через VPN).
 
 import worker from '../src/index';
-import { handleAccount, HttpError, setIamToken } from './auth';
+import { ACCOUNT_PATH, handleAccount, HttpError, setIamToken } from './auth';
 
 type YcEvent = {
   httpMethod: string;
@@ -49,7 +49,7 @@ export async function handler(event: YcEvent, context?: { token?: { access_token
   const qs = new URLSearchParams(query).toString();
 
   // Личный кабинет (регистрация, вход, избранное) — только здесь, в Yandex Cloud: данные хранятся в России.
-  if (/^\/api\/(auth\/|me$|favorites$)/.test(path)) {
+  if (ACCOUNT_PATH.test(path)) {
     const h = Object.fromEntries(Object.entries(event.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
     const cors = accountCors(h.origin);
     const reply = (status: number, body: unknown) => ({

@@ -12,6 +12,7 @@
 // Таблицы — worker/yandex/schema.sql.
 
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
+import { handleAdmin, isAdminEmail } from './admin';
 import { Driver, TokenAuthService, TypedData, TypedValues, Types, type TableSession } from 'ydb-sdk';
 
 const SESSION_DAYS_REMEMBER = 90;
@@ -26,6 +27,8 @@ const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 
 /** Лимиты на хеш IP: [запросов, окно в минутах]. */
 const LIMITS: Record<string, [number, number]> = {
+  admin: [300, 10],
+  stats: [60, 10],
   login: [20, 10],
   register: [5, 60],
   password: [10, 60],
@@ -53,7 +56,7 @@ function secrets(): Keys {
   return keys;
 }
 
-const emailId = (email: string) => createHmac('sha256', secrets().index).update(email).digest('base64url');
+export const emailId = (email: string) => createHmac('sha256', secrets().index).update(email).digest('base64url');
 
 function encrypt(text: string): string {
   const iv = randomBytes(12);
@@ -62,7 +65,7 @@ function encrypt(text: string): string {
   return Buffer.concat([iv, c.getAuthTag(), data]).toString('base64');
 }
 
-function decrypt(b64: string | null | undefined): string {
+export function decrypt(b64: string | null | undefined): string {
   if (!b64) return '';
   const buf = Buffer.from(b64, 'base64');
   const d = createDecipheriv('aes-256-gcm', secrets().enc, buf.subarray(0, 12));
@@ -136,7 +139,7 @@ async function db(): Promise<Driver> {
 }
 
 type Param = ReturnType<typeof TypedValues.utf8>;
-async function q<T = Record<string, unknown>>(sql: string, params: Record<string, Param> = {}): Promise<T[]> {
+export async function q<T = Record<string, unknown>>(sql: string, params: Record<string, Param> = {}): Promise<T[]> {
   const d = await db();
   return d.tableClient.withSessionRetry(async (s: TableSession) => {
     const res = await s.executeQuery(sql, params);
@@ -144,11 +147,11 @@ async function q<T = Record<string, unknown>>(sql: string, params: Record<string
     return rs ? (TypedData.createNativeObjects(rs) as unknown as T[]) : [];
   });
 }
-const U = TypedValues.utf8;
-const TS = TypedValues.timestamp;
+export const U = TypedValues.utf8;
+export const TS = TypedValues.timestamp;
 
 // ─── Лимиты запросов по хешу IP ─────────────────────────────────────────────
-async function rateLimit(kind: keyof typeof LIMITS, ip: string): Promise<void> {
+export async function rateLimit(kind: keyof typeof LIMITS, ip: string): Promise<void> {
   const [max, minutes] = LIMITS[kind];
   const window = Math.floor(Date.now() / (minutes * 60_000));
   // хеш IP с секретом: сам адрес нигде не хранится
@@ -164,7 +167,7 @@ async function rateLimit(kind: keyof typeof LIMITS, ip: string): Promise<void> {
 }
 
 // ─── Проверки ввода ─────────────────────────────────────────────────────────
-function normEmail(v: unknown): string {
+export function normEmail(v: unknown): string {
   const e = String(v ?? '').trim().toLowerCase();
   if (e.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) throw new HttpError(400, 'Проверьте адрес почты.');
   return e;
@@ -188,8 +191,8 @@ function checkPassword(v: unknown, email?: string): string {
 }
 
 // ─── Пользователи и сессии ──────────────────────────────────────────────────
-type UserRow = { eid: string; id: string; emailenc: string; nameenc: string | null; created: Date };
-const publicUser = (u: UserRow) => ({ id: u.id, email: decrypt(u.emailenc), name: decrypt(u.nameenc), created: new Date(u.created).toISOString() });
+export type UserRow = { eid: string; id: string; emailenc: string; nameenc: string | null; created: Date };
+export const publicUser = (u: UserRow) => ({ id: u.id, email: decrypt(u.emailenc), name: decrypt(u.nameenc), created: new Date(u.created).toISOString() });
 
 async function createSession(eid: string, remember: boolean) {
   const token = randomBytes(32).toString('base64url');
@@ -204,19 +207,20 @@ async function createSession(eid: string, remember: boolean) {
 
 const bearer = (auth: string | undefined) => auth?.match(/^Bearer\s+([A-Za-z0-9_-]{20,100})$/)?.[1];
 
-async function userByToken(auth: string | undefined): Promise<UserRow & { tokenHash: string }> {
+export async function userByToken(auth: string | undefined): Promise<UserRow & { tokenHash: string }> {
   const token = bearer(auth);
   if (!token) throw new HttpError(401, 'Войдите в аккаунт.');
   const tokenHash = sha256(token);
   const rows = await q<{ eid: string; expires: Date }>(`DECLARE $t AS Utf8; SELECT eid, expires FROM sessions WHERE token = $t;`, { $t: U(tokenHash) });
   const s = rows[0];
   if (!s || new Date(s.expires) < new Date()) throw new HttpError(401, 'Сессия истекла — войдите снова.');
-  const users = await q<UserRow>(`DECLARE $eid AS Utf8; SELECT eid, id, emailenc, nameenc, created FROM users WHERE eid = $eid;`, { $eid: U(s.eid) });
+  const users = await q<UserRow & { blocked: boolean | null }>(`DECLARE $eid AS Utf8; SELECT eid, id, emailenc, nameenc, created, blocked FROM users WHERE eid = $eid;`, { $eid: U(s.eid) });
   if (!users[0]) throw new HttpError(401, 'Аккаунт не найден.');
+  if (users[0].blocked) throw new HttpError(403, 'Аккаунт заблокирован. Напишите в поддержку.');
   return { ...users[0], tokenHash };
 }
 
-async function dropSessions(eid: string, exceptTokenHash?: string) {
+export async function dropSessions(eid: string, exceptTokenHash?: string) {
   await q(
     `DECLARE $eid AS Utf8; DECLARE $keep AS Utf8;
      DELETE FROM sessions ON SELECT token FROM sessions VIEW idx_eid WHERE eid = $eid AND token != $keep;`,
@@ -261,8 +265,8 @@ async function login(body: Record<string, unknown>, ip: string) {
   const email = normEmail(body.email);
   const password = String(body.password ?? '').slice(0, 200);
   const eid = emailId(email);
-  const rows = await q<UserRow & { hash: string; fails: number | null; lockeduntil: Date | null }>(
-    `DECLARE $eid AS Utf8; SELECT eid, id, emailenc, nameenc, created, hash, fails, lockeduntil FROM users WHERE eid = $eid;`,
+  const rows = await q<UserRow & { hash: string; fails: number | null; lockeduntil: Date | null; blocked: boolean | null }>(
+    `DECLARE $eid AS Utf8; SELECT eid, id, emailenc, nameenc, created, hash, fails, lockeduntil, blocked FROM users WHERE eid = $eid;`,
     { $eid: U(eid) },
   );
   const u = rows[0];
@@ -271,6 +275,7 @@ async function login(body: Record<string, unknown>, ip: string) {
     await scrypt(password, randomBytes(16)); // одинаковое время ответа, есть аккаунт или нет
     throw wrong;
   }
+  if (u.blocked) throw new HttpError(403, 'Аккаунт заблокирован. Напишите в поддержку.');
   if (u.lockeduntil && new Date(u.lockeduntil) > new Date()) throw new HttpError(429, `Слишком много попыток. Попробуйте через ${LOCK_MINUTES} минут.`);
   if (!(await verifyPassword(password, u.hash))) {
     const fails = (u.fails ?? 0) + 1;
@@ -337,7 +342,10 @@ async function removeFavorite(user: UserRow, fid: string, ip: string) {
   return { status: 200, body: { ok: true } };
 }
 
-/** Маршрутизация /api/auth/*, /api/me, /api/favorites. null — путь не наш. */
+/** Пути кабинета: вход, профиль, избранное, объявление, счётчик поисков, кабинет основателя. */
+export const ACCOUNT_PATH = /^\/api\/(auth\/|me$|favorites$|admin\/|stats\/|announcement$)/;
+
+/** Маршрутизация путей кабинета. null — путь не наш. */
 export async function handleAccount(
   method: string,
   path: string,
@@ -346,7 +354,7 @@ export async function handleAccount(
   rawBody: string,
   ip: string,
 ): Promise<{ status: number; body: unknown } | null> {
-  if (!/^\/api\/(auth\/|me$|favorites$)/.test(path)) return null;
+  if (!ACCOUNT_PATH.test(path)) return null;
   secrets(); // без AUTH_SECRET кабинет не работает
   if (rawBody.length > 32_000) throw new HttpError(413, 'Слишком большой запрос.');
   let body: Record<string, unknown> = {};
@@ -359,6 +367,9 @@ export async function handleAccount(
     if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new HttpError(400, 'Некорректный запрос.');
   }
   const auth = headers.authorization;
+  // публичные: объявление на сайте и анонимный счётчик поисков; кабинет основателя — /api/admin/*
+  const extra = await handleAdmin(method, path, query, body, auth, ip);
+  if (extra) return extra;
   if (method === 'POST' && path === '/api/auth/register') return register(body, ip);
   if (method === 'POST' && path === '/api/auth/login') return login(body, ip);
   if (method === 'POST' && path === '/api/auth/logout') {
@@ -367,7 +378,7 @@ export async function handleAccount(
     return { status: 200, body: { ok: true } };
   }
   const user = await userByToken(auth);
-  if (method === 'GET' && path === '/api/me') return { status: 200, body: { user: publicUser(user) } };
+  if (method === 'GET' && path === '/api/me') return { status: 200, body: { user: publicUser(user), admin: isAdminEmail(decrypt(user.emailenc)) } };
   if (method === 'POST' && path === '/api/auth/logout-all') {
     await dropSessions(user.eid, user.tokenHash);
     return { status: 200, body: { ok: true } };

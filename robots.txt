@@ -3,5 +3,7 @@ Allow: /
 # Ссылки с готовым поиском (/?from=…) роботам не нужны: они запускают поиск и тратят лимит API
 Disallow: /*?from=
 Disallow: /*&from=
+# Кабинет основателя
+Disallow: /admin/
 
 Sitemap: https://doedu-russia.ru/sitemap.xml
