@@ -5,6 +5,7 @@
 
 import worker from '../src/index';
 import { ACCOUNT_PATH, handleAccount, HttpError, setIamToken } from './auth';
+import { raspAlert, searchEnv } from './keys';
 
 type YcEvent = {
   httpMethod: string;
@@ -31,11 +32,7 @@ function accountCors(origin: string | undefined): Record<string, string> {
   };
 }
 
-const env = {
-  YANDEX_KEY: process.env.YANDEX_KEY ?? '',
-  TP_TOKEN: process.env.TP_TOKEN,
-  TP_MARKER: process.env.TP_MARKER ?? '795764',
-};
+
 
 export async function handler(event: YcEvent, context?: { token?: { access_token?: string; expires_in?: number } }) {
   setIamToken(context?.token);
@@ -85,6 +82,12 @@ export async function handler(event: YcEvent, context?: { token?: { access_token
     }
   }
   const request = new Request(`https://api.doedu-russia.ru${path}${qs ? `?${qs}` : ''}`, { method: event.httpMethod, headers });
+  // ключи — из кабинета основателя (или переменных функции); при ошибке ключа — сообщение в Telegram
+  // (только для поиска: проверка скорости /api/health не должна ждать базу)
+  const env =
+    path === '/api/search'
+      ? { ...(await searchEnv()), onRaspError: raspAlert }
+      : { YANDEX_KEY: '', TP_TOKEN: process.env.TP_TOKEN, TP_MARKER: process.env.TP_MARKER ?? '795764' };
   const res = await worker.fetch(request, env);
   const out: Record<string, string> = {};
   res.headers.forEach((v, k) => (out[k] = v));

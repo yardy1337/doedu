@@ -13,6 +13,7 @@
 
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { handleAdmin, isAdminEmail } from './admin';
+import { handleInternal, notify } from './keys';
 import { Driver, TokenAuthService, TypedData, TypedValues, Types, type TableSession } from 'ydb-sdk';
 
 const SESSION_DAYS_REMEMBER = 90;
@@ -58,7 +59,7 @@ function secrets(): Keys {
 
 export const emailId = (email: string) => createHmac('sha256', secrets().index).update(email).digest('base64url');
 
-function encrypt(text: string): string {
+export function encrypt(text: string): string {
   const iv = randomBytes(12);
   const c = createCipheriv('aes-256-gcm', secrets().enc, iv);
   const data = Buffer.concat([c.update(text, 'utf8'), c.final()]);
@@ -257,6 +258,11 @@ async function register(body: Record<string, unknown>, ip: string) {
     throw e;
   });
   const session = await createSession(eid, body.remember !== false);
+  // основателю в Telegram — без почты и имени: только факт и общее число
+  const total = await q<{ n: number }>(`SELECT CAST(COUNT(*) AS Uint32) AS n FROM users;`)
+    .then((r) => Number(r[0]?.n ?? 0))
+    .catch(() => 0);
+  await notify('register', `🎉 Доеду: новая регистрация!${total ? ` Всего пользователей: ${total}.` : ''}`);
   return { status: 201, body: { ...session, user: { id, email, name, created: new Date().toISOString() } } };
 }
 
@@ -343,7 +349,7 @@ async function removeFavorite(user: UserRow, fid: string, ip: string) {
 }
 
 /** Пути кабинета: вход, профиль, избранное, объявление, счётчик поисков, кабинет основателя. */
-export const ACCOUNT_PATH = /^\/api\/(auth\/|me$|favorites$|admin\/|stats\/|announcement$)/;
+export const ACCOUNT_PATH = /^\/api\/(auth\/|me$|favorites$|admin\/|stats\/|internal\/|announcement$)/;
 
 /** Маршрутизация путей кабинета. null — путь не наш. */
 export async function handleAccount(
@@ -368,6 +374,8 @@ export async function handleAccount(
   }
   // токен — в X-Auth-Token: заголовок Authorization Yandex Cloud забирает себе (проверка IAM) и отвечает 403
   const auth = headers['x-auth-token'] ? `Bearer ${headers['x-auth-token']}` : headers.authorization;
+  // канал для Cloudflare Worker (ключи API, тревоги) — по общему секрету INTERNAL_SECRET
+  if (path.startsWith('/api/internal/')) return handleInternal(method, path, headers, body);
   // публичные: объявление на сайте и анонимный счётчик поисков; кабинет основателя — /api/admin/*
   const extra = await handleAdmin(method, path, query, body, auth, ip);
   if (extra) return extra;

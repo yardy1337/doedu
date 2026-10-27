@@ -7,6 +7,7 @@
 //   POST /api/stats/search   — анонимный счётчик поисков {from, to} (без данных о человеке)
 
 import { TypedValues } from 'ydb-sdk';
+import { findChats, generateInternalSecret, getKey, listKeys, notifyFlags, putSetting, setKey, testKey } from './keys';
 import { decrypt, dropSessions, emailId, HttpError, normEmail, q, rateLimit, TS, U, userByToken, type UserRow } from './auth';
 
 const D = TypedValues.date;
@@ -216,33 +217,14 @@ async function health() {
     body: {
       db: { ok: true, ms: Date.now() - t0 },
       env: {
-        YANDEX_KEY: Boolean(process.env.YANDEX_KEY),
-        TP_TOKEN: Boolean(process.env.TP_TOKEN),
+        YANDEX_KEY: Boolean(await getKey('YANDEX_KEY')),
+        TP_TOKEN: Boolean(await getKey('TP_TOKEN')),
         AUTH_SECRET: (process.env.AUTH_SECRET ?? '').length >= 32,
         ADMIN_EMAILS: (process.env.ADMIN_EMAILS ?? '').split(',').filter((s) => s.trim()).length,
         DEBUG_ERRORS: process.env.DEBUG_ERRORS === '1',
       },
     },
   };
-}
-
-/** Проверка ключа Яндекс Расписаний: один запрос (тратит 1 из 500 в сутки). Ключ из ответа вырезаем. */
-async function checkRasp() {
-  const key = process.env.YANDEX_KEY;
-  if (!key) return { status: 200, body: { ok: false, message: 'Ключ YANDEX_KEY не задан в функции.' } };
-  const url = new URL('https://api.rasp.yandex.net/v3.0/search/');
-  url.search = new URLSearchParams({ apikey: key, format: 'json', lang: 'ru_RU', from: 'c213', to: 'c2', date: iso(new Date()), limit: '1' }).toString();
-  try {
-    const res = await fetch(url);
-    const data = (await res.json()) as { error?: { text?: string } };
-    if (data.error) {
-      const message = String(data.error.text ?? 'ошибка').replaceAll(key, '<ключ>').replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, '<ключ>');
-      return { status: 200, body: { ok: false, message } };
-    }
-    return { status: 200, body: { ok: true, message: 'Ключ работает.' } };
-  } catch {
-    return { status: 200, body: { ok: false, message: 'Нет связи с API Яндекс Расписаний.' } };
-  }
 }
 
 /** Маршрутизация: публичные пути и /api/admin/*. null — не наш путь. */
@@ -264,6 +246,19 @@ export async function handleAdmin(
   if (method === 'GET' && path === '/api/admin/announcement') return { status: 200, body: { announcement: await getAnnouncement() } };
   if (method === 'POST' && path === '/api/admin/announcement') return setAnnouncement(body);
   if (method === 'GET' && path === '/api/admin/health') return health();
-  if (method === 'POST' && path === '/api/admin/check-rasp') return checkRasp();
+  if (method === 'POST' && path === '/api/admin/check-rasp') return { status: 200, body: await testKey('YANDEX_KEY') };
+  if (method === 'GET' && path === '/api/admin/keys') return { status: 200, body: { keys: await listKeys(), notify: await notifyFlags() } };
+  if (method === 'POST' && path === '/api/admin/keys') {
+    await setKey(String(body.name ?? ''), String(body.value ?? '').slice(0, 300));
+    return { status: 200, body: { keys: await listKeys() } };
+  }
+  if (method === 'POST' && path === '/api/admin/keys/generate') return { status: 200, body: { value: await generateInternalSecret(), keys: await listKeys() } };
+  if (method === 'POST' && path === '/api/admin/keys/test') return { status: 200, body: await testKey(String(body.name ?? '')) };
+  if (method === 'POST' && path === '/api/admin/telegram/chats') return { status: 200, body: { chats: await findChats() } };
+  if (method === 'POST' && path === '/api/admin/notify') {
+    const flags = { register: body.register !== false, rasp: body.rasp !== false };
+    await putSetting('notify', JSON.stringify(flags));
+    return { status: 200, body: { notify: flags } };
+  }
   throw new HttpError(405, 'Метод не поддерживается.');
 }

@@ -26,6 +26,10 @@ interface Env {
   YANDEX_KEY: string;
   TP_TOKEN?: string;
   TP_MARKER?: string;
+  /** Общий секрет с функцией Yandex Cloud: ключи API берутся из кабинета основателя. */
+  INTERNAL_SECRET?: string;
+  /** Ключ Расписаний не работает — сообщить основателю. */
+  onRaspError?: (text: string) => Promise<void>;
 }
 
 // Код станции Яндекса → [город, IATA аэропорта, IATA города, широта, долгота]
@@ -580,6 +584,7 @@ async function handleSearch(url: URL, env: Env): Promise<{ status: number; body:
     if (/не найден|not found/i.test(y.error.text)) return { status: 200, body: { routes: [], meta: { from: { code: from, title: '' }, to: { code: to, title: '' }, date } } };
     // Текст ошибки Яндекса не отдаём посетителю: в нём бывает ключ API. Подробности — в логах сервера.
     console.error('Yandex Rasp error:', y.error.text?.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<ключ>'));
+    await env.onRaspError?.(y.error.text ?? '').catch(() => undefined);
     return { status: 502, body: { error: 'Сервис расписаний временно недоступен. Попробуйте позже.' } };
   }
   const direct = buildRoutes(y, date);
@@ -601,6 +606,40 @@ async function handleSearch(url: URL, env: Env): Promise<{ status: number; body:
         fetchedAt: new Date().toISOString(),
         blablacarUrl: `https://www.blablacar.ru/search?fn=${encodeURIComponent(fromTitle)}&tn=${encodeURIComponent(toTitle)}&db=${date}`,
       },
+    },
+  };
+}
+
+// ─── Ключи из кабинета основателя ────────────────────────────────────────────
+// Кабинет хранит ключи в Yandex Cloud; Worker забирает их раз в 5 минут по общему секрету.
+// Не получилось — работаем на секретах самого Worker.
+const KEYS_URL = 'https://functions.yandexcloud.net/d4ej6mfpkqf6kqleg5t2';
+let remoteKeys: { exp: number; keys: Partial<Pick<Env, 'YANDEX_KEY' | 'TP_TOKEN' | 'TP_MARKER'>> } | null = null;
+
+async function withCabinetKeys(env: Env): Promise<Env> {
+  const secret = env.INTERNAL_SECRET;
+  if (!secret || env.onRaspError) return env;
+  if (!remoteKeys || remoteKeys.exp < Date.now()) {
+    try {
+      const res = await fetch(`${KEYS_URL}?path=/api/internal/keys`, { headers: { 'X-Internal-Key': secret }, signal: AbortSignal.timeout(3000) });
+      remoteKeys = { exp: Date.now() + (res.ok ? 300_000 : 60_000), keys: res.ok ? await res.json() : {} };
+    } catch {
+      remoteKeys = { exp: Date.now() + 60_000, keys: remoteKeys?.keys ?? {} };
+    }
+  }
+  const k = remoteKeys.keys;
+  return {
+    ...env,
+    YANDEX_KEY: k.YANDEX_KEY || env.YANDEX_KEY,
+    TP_TOKEN: k.TP_TOKEN || env.TP_TOKEN,
+    TP_MARKER: k.TP_MARKER || env.TP_MARKER,
+    onRaspError: async (text) => {
+      await fetch(`${KEYS_URL}?path=/api/internal/alert`, {
+        method: 'POST',
+        headers: { 'X-Internal-Key': secret, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text.slice(0, 300) }),
+        signal: AbortSignal.timeout(3000),
+      });
     },
   };
 }
@@ -630,7 +669,7 @@ export default {
       const hit = cache.get(key);
       if (hit && hit.exp > Date.now()) return json(hit.body, 200, origin, { 'X-Cache': 'HIT' });
       try {
-        const { status, body } = await handleSearch(url, env);
+        const { status, body } = await handleSearch(url, await withCabinetKeys(env));
         const text = JSON.stringify(body);
         if (status === 200) {
           cache.set(key, { exp: Date.now() + CACHE_TTL_MS, body: text });
