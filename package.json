@@ -1,0 +1,35 @@
+{
+  "name": "doedu-series",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "remotion studio",
+    "audio": "tsx scripts/generate-audio.ts",
+    "render:vertical": "remotion render Ep1Vertical out/doedu-ep1-vertical.mp4",
+    "render": "npm run render:vertical",
+    "stills": "node scripts/stills.mjs"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.6",
+    "@react-three/fiber": "^9.2.0",
+    "@react-three/postprocessing": "^3.0.4",
+    "@remotion/bundler": "^4.0.539",
+    "@remotion/cli": "^4.0.539",
+    "@remotion/google-fonts": "^4.0.539",
+    "@remotion/renderer": "^4.0.539",
+    "@remotion/three": "^4.0.539",
+    "postprocessing": "^6.37.6",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "remotion": "^4.0.539",
+    "three": "^0.178.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.2.2",
+    "@types/three": "^0.178.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
