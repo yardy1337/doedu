@@ -3,3 +3,4 @@ worker/dist/
 worker/scripts/raw/
 .wrangler/
 .dev.vars
+dist-yandex/
