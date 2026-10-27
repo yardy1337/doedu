@@ -69,7 +69,14 @@ export async function handler(event: YcEvent, context?: { token?: { access_token
       console.error('account error', e);
       // Только тип ошибки (например, SchemeError) — без текста и данных: помогает чинить, ничего не раскрывает
       const code = e instanceof Error ? (e.constructor?.name || e.name || 'Error') : typeof e;
-      return reply(500, { error: 'Ошибка сервера. Попробуйте позже.', code });
+      // DEBUG_ERRORS=1 в переменных функции — показать текст ошибки (без ключей/токенов). По умолчанию выключено.
+      const detail =
+        process.env.DEBUG_ERRORS === '1'
+          ? String(e instanceof Error ? e.message : e)
+              .replace(/[A-Za-z0-9+/_=-]{24,}/g, '<скрыто>')
+              .slice(0, 300)
+          : undefined;
+      return reply(500, { error: 'Ошибка сервера. Попробуйте позже.', code, detail });
     }
   }
   const request = new Request(`https://api.doedu-russia.ru${path}${qs ? `?${qs}` : ''}`, { method: event.httpMethod, headers });

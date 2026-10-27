@@ -120,7 +120,8 @@ const functionAuth = {
 let driver: Driver | null = null;
 async function db(): Promise<Driver> {
   if (driver) return driver;
-  const conn = process.env.YDB_CONNECTION;
+  // пробелы и переносы строк, случайно попавшие при вставке длинного адреса, убираем
+  const conn = process.env.YDB_CONNECTION?.replace(/\s+/g, '');
   if (!conn) throw new HttpError(503, 'Личный кабинет ещё не настроен.');
   const d = new Driver({ connectionString: conn, authService: functionAuth });
   if (!(await d.ready(10_000))) throw new HttpError(503, 'База данных недоступна. Попробуйте позже.');
