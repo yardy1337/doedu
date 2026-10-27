@@ -15,6 +15,7 @@ type YcEvent = {
   params?: Record<string, string>;
   body?: string;
   isBase64Encoded?: boolean;
+  requestContext?: { identity?: { sourceIp?: string } };
 };
 
 const ACCOUNT_ORIGINS = ['https://doedu-russia.ru', 'https://www.doedu-russia.ru', 'http://localhost:5173', 'http://localhost:4173'];
@@ -59,7 +60,8 @@ export async function handler(event: YcEvent) {
     if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: cors, body: '', isBase64Encoded: false };
     const raw = event.body ? (event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString('utf8') : event.body) : '';
     try {
-      const res = await handleAccount(event.httpMethod, path, query, h, raw);
+      const ip = event.requestContext?.identity?.sourceIp ?? h['x-forwarded-for']?.split(',')[0]?.trim() ?? 'unknown';
+      const res = await handleAccount(event.httpMethod, path, query, h, raw, ip);
       return res ? reply(res.status, res.body) : reply(404, { error: 'Not found' });
     } catch (e) {
       if (e instanceof HttpError) return reply(e.status, { error: e.message });
