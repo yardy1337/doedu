@@ -1,6 +1,6 @@
 # doedu-api — API поиска маршрутов «Доеду»
 
-Cloudflare Worker. Сейчас развёрнут на `https://doedu-api.doedu.workers.dev`, сайт (`/index.html`) ходит туда за маршрутами.
+Cloudflare Worker. Развёрнут на `https://doedu-api.doedu.workers.dev`, `https://api.doedu-russia.ru` (Cloudflare) и `https://functions.yandexcloud.net/d4ej6mfpkqf6kqleg5t2` (Yandex Cloud Functions, сборка `npm run build:yandex`), сайт (`/index.html`) ходит туда за маршрутами.
 
 ## Что внутри
 
