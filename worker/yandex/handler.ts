@@ -76,7 +76,12 @@ export async function handler(event: YcEvent, context?: { token?: { access_token
               .replace(/[A-Za-z0-9+/_=-]{24,}/g, '<скрыто>')
               .slice(0, 300)
           : undefined;
-      return reply(500, { error: 'Ошибка сервера. Попробуйте позже.', code, detail });
+      // адрес базы, как его видит функция (не секрет): помогает найти опечатку в YDB_CONNECTION
+      const db =
+        process.env.DEBUG_ERRORS === '1'
+          ? JSON.stringify(process.env.YDB_CONNECTION ?? null) + ' → ' + (process.env.YDB_CONNECTION ?? '').replace(/\s+/g, '')
+          : undefined;
+      return reply(500, { error: 'Ошибка сервера. Попробуйте позже.', code, detail, db });
     }
   }
   const request = new Request(`https://api.doedu-russia.ru${path}${qs ? `?${qs}` : ''}`, { method: event.httpMethod, headers });
