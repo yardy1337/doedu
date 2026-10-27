@@ -33,6 +33,7 @@ const STATIONS = stationsData as Record<string, [string, string | null, string |
 
 const ALLOWED_ORIGINS = ['https://yardyproject.ru', 'https://doedu-russia.ru', 'https://www.doedu-russia.ru', 'http://localhost:5173', 'http://localhost:4173'];
 const CACHE_TTL_MS = 30 * 60 * 1000;
+const BOT_UA = /bot|crawl|spider|slurp|yandex(?!browser)|google(?!.*chrome)|bingpreview|headless|lighthouse|facebookexternalhit/i;
 const cache = new Map<string, { exp: number; body: string }>();
 
 // ─── Типы ответа (зеркало src/types.ts на фронтенде) ─────────────────────────
@@ -443,13 +444,26 @@ async function attachPrices(env: Env, routes: Route[], marker: string) {
   }
 }
 
-async function yandexSearch(env: Env, from: string, to: string, date: string, transfers = true): Promise<YResponse> {
+// Лимит ключа Яндекс Расписаний — 500 запросов в сутки, поэтому ответы кэшируем надолго
+// и в общем кэше Cloudflare (Cache API), а не только в памяти одного экземпляра воркера.
+const Y_CACHE_TTL_S = 12 * 3600;
+const sharedCache = (): Cache | null => (typeof caches !== 'undefined' ? (caches as unknown as { default: Cache }).default : null);
+
+async function yandexSearch(env: Env, from: string, to: string, date: string, transfers = true, maxPages = 2): Promise<YResponse> {
   const key = `y:${from}:${to}:${date}:${transfers}`;
   const hit = cache.get(key);
   if (hit && hit.exp > Date.now()) return JSON.parse(hit.body);
+  const cacheReq = new Request(`https://cache.doedu.internal/${key}`);
+  const shared = sharedCache();
+  const sharedHit = shared ? await shared.match(cacheReq).catch(() => undefined) : undefined;
+  if (sharedHit) {
+    const body = await sharedHit.text();
+    cache.set(key, { exp: Date.now() + Y_CACHE_TTL_S * 1000, body });
+    return JSON.parse(body);
+  }
   const all: YSegment[] = [];
   let first: YResponse | null = null;
-  for (let offset = 0, page = 0; page < 3; page++, offset += 100) {
+  for (let offset = 0, page = 0; page < maxPages; page++, offset += 100) {
     const url = new URL('https://api.rasp.yandex.net/v3.0/search/');
     url.search = new URLSearchParams({
       apikey: env.YANDEX_KEY,
@@ -474,26 +488,30 @@ async function yandexSearch(env: Env, from: string, to: string, date: string, tr
     if (offset + 100 >= total) break;
   }
   const result = { ...(first ?? {}), segments: all };
-  cache.set(key, { exp: Date.now() + CACHE_TTL_MS * 2, body: JSON.stringify(result) });
+  const body = JSON.stringify(result);
+  cache.set(key, { exp: Date.now() + Y_CACHE_TTL_S * 1000, body });
+  if (shared) {
+    await shared
+      .put(cacheReq, new Response(body, { headers: { 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${Y_CACHE_TTL_S}` } }))
+      .catch(() => undefined);
+  }
   return result;
 }
 
-const nextDate = (date: string) => new Date(Date.parse(date + 'T00:00:00Z') + 86_400_000).toISOString().slice(0, 10);
-
 /** Склеивает прямые рейсы А → узел и узел → Б в маршруты с пересадкой. */
 async function hubRoutes(env: Env, from: string, to: string, date: string): Promise<Route[]> {
-  const hubs = pickHubs(from, to, 3);
+  // 2 узла × 2 запроса по одной странице — экономим лимит ключа (500 запросов в сутки)
+  const hubs = pickHubs(from, to, 2);
   const out: Route[] = [];
   await Promise.all(
     hubs.map(async (hub) => {
-      const [first, second, secondNext] = await Promise.all([
-        yandexSearch(env, from, hub, date, false),
-        yandexSearch(env, hub, to, date, false),
-        yandexSearch(env, hub, to, nextDate(date), false),
+      const [first, second] = await Promise.all([
+        yandexSearch(env, from, hub, date, false, 1),
+        yandexSearch(env, hub, to, date, false, 1),
       ]);
-      if (first.error) return;
+      if (first.error || second.error) return;
       const legs1 = buildRoutes(first, date).filter((r) => r.legs.length === 1).map((r) => r.legs[0] as TripLeg);
-      const legs2 = [...buildRoutes(second, date), ...(secondNext.error ? [] : buildRoutes(secondNext, date))]
+      const legs2 = buildRoutes(second, date)
         .filter((r) => r.legs.length === 1)
         .map((r) => r.legs[0] as TripLeg)
         .sort((a, b) => Date.parse(a.departure) - Date.parse(b.departure));
@@ -564,8 +582,10 @@ async function handleSearch(url: URL, env: Env): Promise<{ status: number; body:
     console.error('Yandex Rasp error:', y.error.text?.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<ключ>'));
     return { status: 502, body: { error: 'Сервис расписаний временно недоступен. Попробуйте позже.' } };
   }
-  const extra = await hubRoutes(env, from, to, date).catch(() => [] as Route[]);
-  const routes = mergeRoutes(buildRoutes(y, date), extra);
+  const direct = buildRoutes(y, date);
+  // Свои пересадки через крупные города — только если Яндекс сам нашёл мало вариантов
+  const extra = direct.length < 5 ? await hubRoutes(env, from, to, date).catch(() => [] as Route[]) : [];
+  const routes = mergeRoutes(direct, extra);
   await attachPrices(env, routes, env.TP_MARKER || '795764');
   const fromTitle = y.search?.from.title ?? '';
   const toTitle = y.search?.to.title ?? '';
@@ -604,6 +624,8 @@ export default {
     }
 
     if (url.pathname === '/api/search') {
+      // Поисковые роботы, рендерящие страницы, не тратят лимит ключа Яндекс Расписаний
+      if (BOT_UA.test(request.headers.get('User-Agent') ?? '')) return json({ routes: [], meta: { bot: true } }, 200, origin);
       const key = url.pathname + url.search;
       const hit = cache.get(key);
       if (hit && hit.exp > Date.now()) return json(hit.body, 200, origin, { 'X-Cache': 'HIT' });
