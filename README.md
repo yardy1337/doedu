@@ -40,6 +40,11 @@ src/
 - Подчистка дубля (серия 2): `maxPause` сжимает затянутые паузы модели, `holdBefore` выдерживает сценарную паузу
   («До… Еду»), `loudnorm` выравнивает громкость. `--retidy` применяет это к уже готовым файлам без нового запроса к API.
 - Тайминг сцен сам подстраивается под длину реплик и время слов (см. `BEATS` / `BEATS2`).
+- **Gemini TTS (Google AI Studio)** — нативные русские голоса: `GEMINI_API_KEY` в окружении и
+  `npm run audio:ep2 -- --provider=gemini --force` (или `TTS_PROVIDER=gemini`). Пробники голосов для выбора:
+  `npm run audio -- --ep=ep2 --provider=gemini --samples` → `public/audio/samples/`. Голоса — `GEMINI_VOICE_*`,
+  интонация — `direction` у реплики. Gemini не отдаёт время слов: `scripts/tts-gemini.ts` оценивает его по паузам
+  (ffmpeg silencedetect) и слогам — точность около 0.1 с. Звуковые эффекты по-прежнему через ElevenLabs.
 
 ## Серия 2: что добавлено в общие компоненты (серия 1 не меняется)
 - `Stickman3D` / `Eyes`: необязательные `squint` (прищур), `sparkle` (блики радости), `brow`/`browAsym` (брови),

@@ -1,10 +1,12 @@
 /**
- * Озвучка и звуки серии через ElevenLabs.
+ * Озвучка и звуки серии: голоса — ElevenLabs или Gemini (Google AI Studio), звуки — ElevenLabs.
  *   npm run audio                    — сгенерировать недостающее
  *   npm run audio -- --force         — перегенерировать всё
  *   npm run audio -- --only=hero_01  — перегенерировать один файл
  *   npm run audio -- --ep=ep2        — другая серия (по умолчанию ep1)
  *   npm run audio -- --retidy        — заново подчистить паузы/громкость готовых дублей
+ *   npm run audio -- --provider=gemini — голоса через Gemini TTS (или TTS_PROVIDER=gemini в .env)
+ *   npm run audio -- --provider=gemini --samples — пробники голосов Gemini для каждой роли → public/audio/samples/
  * Реплики и звуки берутся из сценария серии (src/episodes/<ep>.lines.ts).
  * Серия 1 пишет public/audio/*.mp3, public/audio/sfx/*.mp3 и src/episodes/audio-timing.json;
  * остальные — public/audio/<ep>/… и src/episodes/<ep>.audio-timing.json.
@@ -13,6 +15,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { LineDef, SfxDef } from "../src/episodes/ep1.lines";
+import { geminiTts } from "./tts-gemini";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const envPath = path.join(ROOT, ".env");
@@ -31,6 +34,14 @@ const VOICES: Record<string, string> = {
   savior: process.env.VOICE_SAVIOR || "IKne3meq5aSn9XLyUdCD",
   narrator: process.env.VOICE_NARRATOR || "onwK4e9ZLuTAKqWW03F9",
 };
+const PROVIDER = process.argv.find((a) => a.startsWith("--provider="))?.slice(11) ?? process.env.TTS_PROVIDER ?? "elevenlabs";
+// Голоса Gemini (prebuilt): https://aistudio.google.com — Generate speech → Voice
+const GEMINI_VOICES: Record<string, string> = {
+  hero: process.env.GEMINI_VOICE_HERO || "Puck",
+  savior: process.env.GEMINI_VOICE_SAVIOR || "Charon",
+  narrator: process.env.GEMINI_VOICE_NARRATOR || "Iapetus",
+};
+const SAMPLES = process.argv.includes("--samples");
 const FORCE = process.argv.includes("--force");
 const ONLY = process.argv.find((a) => a.startsWith("--only="))?.slice(7);
 const RETIDY = process.argv.includes("--retidy");
@@ -134,8 +145,29 @@ function tidy(out: string, tm: Timing, l: LineDef): Timing {
 
 const need = (id: string, out: string) => (ONLY ? ONLY === id : FORCE || !fs.existsSync(out));
 
+/** Пробники: одна реплика каждой роли разными голосами Gemini */
+const CANDIDATES: Record<string, string[]> = {
+  hero: ["Puck", "Fenrir", "Achird", "Zubenelgenubi", "Sadachbia"],
+  savior: ["Charon", "Algenib", "Orus", "Alnilam", "Rasalgethi"],
+  narrator: ["Iapetus", "Schedar", "Sadaltager", "Algieba"],
+};
+async function samples(lines: LineDef[]) {
+  const dir = path.join(ROOT, "public/audio/samples");
+  fs.mkdirSync(dir, { recursive: true });
+  for (const role of Object.keys(CANDIDATES)) {
+    const l = lines.filter((x) => x.voice === role).sort((a, b) => b.text.length - a.text.length)[Math.min(1, lines.filter((x) => x.voice === role).length - 1)];
+    for (const v of CANDIDATES[role]) {
+      const out = path.join(dir, `${role}-${v}.mp3`);
+      if (fs.existsSync(out) && !FORCE) continue;
+      await geminiTts(v, l.text, out, l.direction);
+      console.log(`♪ samples/${role}-${v}.mp3 «${l.text.replace(/\[[^\]]*\]\s*/g, "").slice(0, 60)}»`);
+    }
+  }
+}
+
 async function main() {
   const { LINES, SFX } = (await import(`../src/episodes/${EP}.lines.ts`)) as { LINES: LineDef[]; SFX: SfxDef[] };
+  if (SAMPLES) return samples(LINES);
   const audioDir = path.join(ROOT, "public/audio", AUDIO_SUBDIR);
   fs.mkdirSync(path.join(audioDir, "sfx"), { recursive: true });
   const timingPath = path.join(ROOT, "src/episodes", TIMING_FILE);
@@ -147,7 +179,9 @@ async function main() {
       if (RETIDY && timing[l.id]) timing[l.id] = tidy(out, timing[l.id], l);
       continue;
     }
-    timing[l.id] = tidy(out, await tts(VOICES[l.voice], l.text, out, l.settings ?? {}), l);
+    const take =
+      PROVIDER === "gemini" ? await geminiTts(GEMINI_VOICES[l.voice], l.text, out, l.direction) : await tts(VOICES[l.voice], l.text, out, l.settings ?? {});
+    timing[l.id] = tidy(out, take, l);
     fs.writeFileSync(timingPath, JSON.stringify(timing, null, 2));
     console.log(`♪ ${l.id} [${l.voice}] «${l.text}» — ${timing[l.id].duration.toFixed(2)} с`);
   }

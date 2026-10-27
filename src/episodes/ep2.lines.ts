@@ -10,37 +10,37 @@ const SAVIOR_CALM = { stability: 0.7, style: 0.2 };
 const TIDY = { loudnorm: true, maxPause: 1.4 };
 
 export const LINES: LineDef[] = ([
-  { id: "hero_01", voice: "hero", text: "[scared] Кто… [stammers] кто вы?", settings: HERO_SCARED },
+  { id: "hero_01", voice: "hero", text: "[scared] Кто… [stammers] кто вы?", direction: "A frightened young man, trembling voice, stammering", settings: HERO_SCARED },
   {
     id: "savior_01",
     voice: "savior",
     text: "[calm] Я — Доеду. Точнее, его голосовой помощник. Меня зовут До. [pause] До… [pause] Еду.",
-    settings: SAVIOR_CALM,
+    direction: "A calm, deep, confident superhero voice with a little playful wit. Make a short pause after the first \"До.\" and a long dramatic pause before the final word \"Еду\"", settings: SAVIOR_CALM,
     // игра слов: «До.» — короткая пауза — «До…» — выдержанная пауза — «Еду.»
     maxPause: 0.75,
     holdBefore: { Еду: 1.15 },
   },
-  { id: "hero_02", voice: "hero", text: "[nervous] А те люди? Они хотели меня… [whispers] съесть?", settings: HERO_SCARED },
+  { id: "hero_02", voice: "hero", text: "[nervous] А те люди? Они хотели меня… [whispers] съесть?", direction: "A scared young man asks nervously; the last word is a fearful whisper", settings: HERO_SCARED },
   {
     id: "savior_02",
     voice: "savior",
     text:
       "[serious] Хуже. Они — «Только Авиа», «Только Жэ-Дэ» и «Только Попутка». Каждый тянул тебя в свою экосистему. " +
       "Ты шёл с чемоданом, а они видели в тебе… пассажира без единого приложения.",
-    settings: SAVIOR_CALM,
+    direction: "A calm, deep, serious superhero voice, slightly ironic, like telling a dark secret", settings: SAVIOR_CALM,
   },
-  { id: "hero_03", voice: "hero", text: "[hesitant] И что теперь?", settings: { stability: 0.4, style: 0.45 } },
+  { id: "hero_03", voice: "hero", text: "[hesitant] И что теперь?", direction: "A shaken young man asks hesitantly", settings: { stability: 0.4, style: 0.45 } },
   {
     id: "savior_03",
     voice: "savior",
     text:
       "[warmly] Теперь ты поедешь. Гибридный маршрут: поезд до Твери, там — автобус до причала, и пешком до санатория. " +
       "Всё в одном приложении. Без пересадок в других сервисах.",
-    settings: SAVIOR_CALM,
+    direction: "A calm, deep, warm and reassuring superhero voice, confident and clear, like presenting a great plan", settings: SAVIOR_CALM,
   },
-  { id: "hero_04", voice: "hero", text: "[hopeful] А если я… опоздаю?", settings: { stability: 0.4, style: 0.45 } },
-  { id: "savior_04", voice: "savior", text: "[calm] Тогда я приду снова. С алой буквой «Дэ».", settings: SAVIOR_CALM },
-  { id: "narrator_01", voice: "narrator", text: "Доеду. Все пути по России.", settings: { stability: 0.6 } },
+  { id: "hero_04", voice: "hero", text: "[hopeful] А если я… опоздаю?", direction: "A young man, now hopeful but still a bit anxious", settings: { stability: 0.4, style: 0.45 } },
+  { id: "savior_04", voice: "savior", text: "[calm] Тогда я приду снова. С алой буквой «Дэ».", direction: "A calm, deep, heroic voice, a solemn promise", settings: SAVIOR_CALM },
+  { id: "narrator_01", voice: "narrator", text: "Доеду. Все пути по России.", direction: "A movie trailer narrator, clear, warm and steady", settings: { stability: 0.6 } },
 ] as LineDef[]).map((l) => ({ ...TIDY, ...l }));
 
 export const SFX: SfxDef[] = [

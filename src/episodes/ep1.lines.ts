@@ -12,14 +12,16 @@ export type LineDef = {
   holdBefore?: Record<string, number>;
   /** выровнять громкость (EBU R128, −16 LUFS) */
   loudnorm?: boolean;
+  /** ремарка для Gemini TTS (по-английски): как произнести реплику */
+  direction?: string;
 };
 export type SfxDef = { id: string; prompt: string; seconds: number; loop?: boolean };
 
 export const LINES: LineDef[] = [
-  { id: "hero_01", voice: "hero", text: "[whispers] Чего они все на меня смотрят?..", settings: { stability: 0.4 } },
-  { id: "hero_02", voice: "hero", text: "[nervous] Ну всё. Приехал.", settings: { stability: 0.4 } },
-  { id: "savior_01", voice: "savior", text: "[calm] Тебе куда?", settings: { stability: 0.7, style: 0.2 } },
-  { id: "narrator_01", voice: "narrator", text: "Доеду. Продолжение следует.", settings: { stability: 0.6 } },
+  { id: "hero_01", voice: "hero", text: "[whispers] Чего они все на меня смотрят?..", settings: { stability: 0.4 }, direction: "A nervous young man whispers anxiously to himself" },
+  { id: "hero_02", voice: "hero", text: "[nervous] Ну всё. Приехал.", settings: { stability: 0.4 }, direction: "A terrified young man, cornered, says with resigned dread" },
+  { id: "savior_01", voice: "savior", text: "[calm] Тебе куда?", settings: { stability: 0.7, style: 0.2 }, direction: "A calm, deep, confident superhero voice, warm and unhurried" },
+  { id: "narrator_01", voice: "narrator", text: "Доеду. Продолжение следует.", settings: { stability: 0.6 }, direction: "A movie trailer narrator, clear and steady" },
 ];
 
 export const SFX: SfxDef[] = [
