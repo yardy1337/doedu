@@ -111,12 +111,19 @@ export async function putSetting(k: string, v: string) {
 async function tg(method: string, body: Record<string, unknown>, token?: string) {
   const t = token ?? (await getKey('TG_BOT_TOKEN'));
   if (!t) throw new HttpError(400, 'Сначала сохраните токен бота.');
-  const res = await fetch(`https://api.telegram.org/bot${t}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(5000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`https://api.telegram.org/bot${t}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (e) {
+    const err = e as Error & { cause?: { code?: string; message?: string } };
+    const why = err.name === 'TimeoutError' ? 'нет ответа за 8 с' : err.cause?.code || err.cause?.message || err.message;
+    throw new HttpError(502, `Нет связи с Telegram из Yandex Cloud (${String(why).replace(t, '<токен>').slice(0, 120)}).`);
+  }
   const data = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string; result?: unknown };
   if (!data.ok) throw new HttpError(400, `Telegram: ${String(data.description ?? res.status).replace(t, '<токен>')}`);
   return data.result;
