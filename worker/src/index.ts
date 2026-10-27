@@ -560,7 +560,9 @@ async function handleSearch(url: URL, env: Env): Promise<{ status: number; body:
   if (y.error) {
     // «Ничего не нашли» — не ошибка сервиса, а пустая выдача
     if (/не найден|not found/i.test(y.error.text)) return { status: 200, body: { routes: [], meta: { from: { code: from, title: '' }, to: { code: to, title: '' }, date } } };
-    return { status: 502, body: { error: 'Сервис расписаний вернул ошибку: ' + y.error.text } };
+    // Текст ошибки Яндекса не отдаём посетителю: в нём бывает ключ API. Подробности — в логах сервера.
+    console.error('Yandex Rasp error:', y.error.text?.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<ключ>'));
+    return { status: 502, body: { error: 'Сервис расписаний временно недоступен. Попробуйте позже.' } };
   }
   const extra = await hubRoutes(env, from, to, date).catch(() => [] as Route[]);
   const routes = mergeRoutes(buildRoutes(y, date), extra);
