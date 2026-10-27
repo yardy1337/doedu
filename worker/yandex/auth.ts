@@ -123,7 +123,13 @@ async function db(): Promise<Driver> {
   // пробелы и переносы строк, случайно попавшие при вставке длинного адреса, убираем
   const conn = process.env.YDB_CONNECTION?.replace(/\s+/g, '');
   if (!conn) throw new HttpError(503, 'Личный кабинет ещё не настроен.');
-  const d = new Driver({ connectionString: conn, authService: functionAuth });
+  // Разбираем адрес сами: ydb-sdk берёт базу из пути URL, а в адресе Yandex Cloud путь — «/»,
+  // и параметр ?database= он тогда не читает (получается «Database not found»).
+  const url = new URL(conn);
+  const database = url.searchParams.get('database') || (url.pathname !== '/' ? url.pathname : '');
+  if (!database) throw new HttpError(503, 'Личный кабинет ещё не настроен: в YDB_CONNECTION нет пути к базе.');
+  const endpoint = `${url.protocol}//${url.host}`;
+  const d = new Driver({ endpoint, database, authService: functionAuth });
   if (!(await d.ready(10_000))) throw new HttpError(503, 'База данных недоступна. Попробуйте позже.');
   driver = d;
   return d;
