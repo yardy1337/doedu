@@ -1,14 +1,28 @@
 // Реплики и звуки серии 1. Меняете текст → `npm run audio -- --force` (или --only=id).
 export type Voice = "hero" | "savior" | "narrator";
 
-export const LINES: { id: string; voice: Voice; text: string; settings?: Record<string, number> }[] = [
+export type LineDef = {
+  id: string;
+  voice: Voice;
+  text: string;
+  settings?: Record<string, number>;
+  /** сжать паузы между словами до N секунд */
+  maxPause?: number;
+  /** выдержать паузу перед словом: { "Еду": 1.1 } */
+  holdBefore?: Record<string, number>;
+  /** выровнять громкость (EBU R128, −16 LUFS) */
+  loudnorm?: boolean;
+};
+export type SfxDef = { id: string; prompt: string; seconds: number; loop?: boolean };
+
+export const LINES: LineDef[] = [
   { id: "hero_01", voice: "hero", text: "[whispers] Чего они все на меня смотрят?..", settings: { stability: 0.4 } },
   { id: "hero_02", voice: "hero", text: "[nervous] Ну всё. Приехал.", settings: { stability: 0.4 } },
   { id: "savior_01", voice: "savior", text: "[calm] Тебе куда?", settings: { stability: 0.7, style: 0.2 } },
   { id: "narrator_01", voice: "narrator", text: "Доеду. Продолжение следует.", settings: { stability: 0.6 } },
 ];
 
-export const SFX: { id: string; prompt: string; seconds: number; loop?: boolean }[] = [
+export const SFX: SfxDef[] = [
   { id: "station_ambience", prompt: "empty night train station ambience, low electrical hum, distant echo, quiet, cinematic", seconds: 22, loop: true },
   { id: "announcement", prompt: "distant unintelligible train station PA announcement, muffled reverberant voice, far away", seconds: 5 },
   { id: "suitcase_wheels", prompt: "small plastic suitcase wheels rolling over tiled floor, rhythmic clicking on tile joints", seconds: 6, loop: true },

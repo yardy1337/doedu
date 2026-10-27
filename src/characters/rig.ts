@@ -152,10 +152,63 @@ export const rigMatrices = (p: Pose, scale = 1) => {
       .multiply(tr(0, -DIMS.upperArm, 0))
       .multiply(rot(-l.bend, 0, 0))
       .multiply(tr(0, -DIMS.foreArm, 0));
-  return { root, pelvis, chest, head, handL: hand(1, p.armL), handR: hand(-1, p.armR) };
+  const leg = (sideSign: 1 | -1, l: Limb) => {
+    const knee = pelvis
+      .clone()
+      .multiply(tr(sideSign * DIMS.hipX, 0, 0))
+      .multiply(rot(-l.pitch, 0, sideSign * l.roll))
+      .multiply(tr(0, -DIMS.thigh, 0));
+    const foot = knee.clone().multiply(rot(l.bend, 0, 0)).multiply(tr(0, -DIMS.shin, 0));
+    return { knee, foot };
+  };
+  const legL = leg(1, p.legL);
+  const legR = leg(-1, p.legR);
+  return {
+    root,
+    pelvis,
+    chest,
+    head,
+    handL: hand(1, p.armL),
+    handR: hand(-1, p.armR),
+    kneeL: legL.knee,
+    kneeR: legR.knee,
+    footL: legL.foot,
+    footR: legR.foot,
+  };
 };
 
 export const pointOf = (m: THREE.Matrix4, local: [number, number, number] = [0, 0, 0]): [number, number, number] => {
   const v = new THREE.Vector3(...local).applyMatrix4(m);
   return [v.x, v.y, v.z];
+};
+
+/** Кисть в локальных координатах корня (для реквизита, который держат в руке) */
+export const handLocal = (p: Pose, side: "L" | "R" = "R"): [number, number, number] => {
+  const m = rigMatrices(withPose(p, { x: 0, z: 0, yaw: 0 }));
+  return pointOf(side === "L" ? m.handL : m.handR);
+};
+
+/**
+ * Дрожь всем телом (детерминированная): мелкая частая тряска корпуса, головы и рук.
+ * amount 0..1; t — секунды.
+ */
+export const tremble = (p: Pose, t: number, amount: number): Pose => {
+  if (amount <= 0) return p;
+  const n = (f: number, ph: number) => Math.sin(t * f + ph) * 0.6 + Math.sin(t * f * 1.73 + ph * 2.1) * 0.4;
+  const a = amount;
+  const limb = (l: Limb, ph: number): Limb => ({ pitch: l.pitch + n(41, ph) * 0.035 * a, roll: l.roll + n(37, ph + 1) * 0.02 * a, bend: l.bend + n(45, ph + 2) * 0.05 * a });
+  return {
+    ...p,
+    x: p.x + n(29, 0.3) * 0.006 * a,
+    lean: p.lean + n(33, 1.1) * 0.018 * a,
+    side: p.side + n(39, 2.3) * 0.02 * a,
+    headRoll: p.headRoll + n(43, 0.7) * 0.05 * a,
+    headPitch: p.headPitch + n(35, 1.9) * 0.03 * a,
+    headYaw: p.headYaw + n(31, 2.9) * 0.025 * a,
+    lift: p.lift - (0.012 + n(47, 0.1) * 0.006) * a, // колени подогнуты
+    armL: limb(p.armL, 0.4),
+    armR: limb(p.armR, 1.7),
+    legL: { ...p.legL, bend: p.legL.bend + (0.08 + n(51, 0.2) * 0.03) * a },
+    legR: { ...p.legR, bend: p.legR.bend + (0.08 + n(49, 1.2) * 0.03) * a },
+  };
 };

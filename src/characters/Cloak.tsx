@@ -6,7 +6,7 @@ import { BRAND } from "../brand";
  * Длинный плащ с высоким воротом. Сетка — разрезанный спереди цилиндр;
  * вершины смещаются волной, рассчитанной только от времени t (детерминированно).
  */
-export const Cloak: React.FC<{ t: number; wind: number; top: number; length: number }> = ({ t, wind, top, length }) => {
+export const Cloak: React.FC<{ t: number; wind: number; top: number; length: number; open?: number }> = ({ t, wind, top, length, open = 0 }) => {
   const RAD = 30;
   const HSEG = 22;
   const OPEN = 0.95; // ширина разреза спереди (рад)
@@ -22,16 +22,27 @@ export const Cloak: React.FC<{ t: number; wind: number; top: number; length: num
     const y = src.getY(i);
     const z = src.getZ(i);
     const v = (length / 2 - y) / length; // 0 — плечи, 1 — низ
-    const a = Math.atan2(x, z);
+    let a = Math.atan2(x, z);
     const back = Math.max(0, -Math.cos(a)); // задняя часть плаща
     const wave = Math.sin(a * 3 + t * 3.1 - v * 5) * 0.5 + Math.sin(a * 5 - t * 4.3 + v * 3) * 0.25;
-    const amp = wind * Math.pow(v, 1.4);
+    const amp = wind * Math.pow(Math.max(0, v), 1.4); // v чуть < 0 из-за округления давал NaN
     const r = 1 + wave * 0.2 * amp;
+    let px = x, py = y, pz = z;
+    if (open > 0) {
+      // распахнуть: полы уходят в стороны и назад, как крылья (плечи почти на месте)
+      const front = 1 - Math.abs(a) / Math.PI; // 1 — у разреза, 0 — сзади
+      const k = open * (0.35 + 0.65 * Math.min(1, v * 1.6));
+      a += Math.sign(a) * k * (Math.PI - Math.abs(a)) * 0.6;
+      const rad = Math.hypot(x, z) * (1 + k * front * 1.1);
+      px = Math.sin(a) * rad;
+      pz = Math.cos(a) * rad;
+      py = y + k * front * front * 0.18 * v;
+    }
     dst.setXYZ(
       i,
-      x * r + Math.sin(t * 2.3 + v * 3) * 0.04 * amp,
-      y + Math.sin(t * 3.7 + a * 2) * 0.03 * amp,
-      z * r - back * (0.28 + Math.sin(t * 2.7 - v * 4 + a) * 0.12) * amp,
+      px * r + Math.sin(t * 2.3 + v * 3) * 0.04 * amp,
+      py + Math.sin(t * 3.7 + a * 2) * 0.03 * amp,
+      pz * r - back * (0.28 + Math.sin(t * 2.7 - v * 4 + a) * 0.12) * amp,
     );
   }
   dst.needsUpdate = true;

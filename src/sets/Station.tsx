@@ -215,7 +215,8 @@ export const Station: React.FC<{
   reflections?: boolean;
   fogCards?: { x: number; y: number; z: number; s: number; o: number }[];
   cam?: [number, number, number];
-}> = ({ t, shadowLampX, shadowTarget, reflections = true, fogCards = [], cam = [0, 1, 5] }) => {
+  train?: boolean;
+}> = ({ t, shadowLampX, shadowTarget, reflections = true, fogCards = [], cam = [0, 1, 5], train = true }) => {
   const tiles = useTileTexture();
   const len = STATION.WALL_X - STATION.startX;
   const cx = (STATION.WALL_X + STATION.startX) / 2;
@@ -260,7 +261,7 @@ export const Station: React.FC<{
         <planeGeometry args={[len, 5]} />
         <meshStandardMaterial color={BRAND.grey.g10} roughness={1} />
       </mesh>
-      <Train />
+      {train && <Train />}
       {/* задняя стена и колонны */}
       <mesh position={[cx, 3, STATION.backZ + 0.3]} receiveShadow>
         <boxGeometry args={[len, 6, 0.4]} />

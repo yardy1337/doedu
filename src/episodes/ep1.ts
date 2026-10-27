@@ -12,6 +12,7 @@ import { SAVIOR_SCALE } from "../characters/Characters";
 import { STATION } from "../sets/Station";
 import { angleLerp, clamp, inn, inOut, lerp, lerp3, linear, out, pulse, ramp, rng, shake, track, track3, V3 } from "../lib/anim";
 import { CrowdState, Episode, FxState, HeroState, SaviorState } from "./types";
+import { blinkAt, handOf, headOf, mixLimbs, Shot, shotCamera, walker } from "./helpers";
 
 // ---------------------------------------------------------------------
 // Длительность реплик (из ElevenLabs) — тайминг подстраивается под них
@@ -68,28 +69,6 @@ export const BEATS = {
   end: END,
 };
 const B = BEATS;
-
-// ---------------------------------------------------------------------
-// Вспомогательное: ходьба по траектории (фаза шага интегрируется по пути)
-// ---------------------------------------------------------------------
-const stride = (v: number) => 0.95 + 0.45 * clamp(v / 3.2);
-const STEP = 1 / 30;
-function walker(t: number, pos: (t: number) => [number, number], from: number) {
-  const p = pos(t);
-  const p2 = pos(t + 0.04);
-  const p1 = pos(t - 0.04);
-  const v = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 0.08;
-  let phase = 0;
-  for (let s = from; s < t; s += STEP) {
-    const a = pos(s);
-    const b = pos(Math.min(t, s + STEP));
-    const dd = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    phase += (dd / stride(dd / STEP)) * Math.PI;
-  }
-  return { x: p[0], z: p[1], v, phase };
-}
-
-const blinkAt = (t: number, times: number[]) => Math.max(0, ...times.map((b) => pulse(t, b, b + 0.06, b + 0.1, b + 0.2)));
 
 // ---------------------------------------------------------------------
 // ГЕРОЙ
@@ -175,12 +154,6 @@ function heroPose(t: number): Pose {
   p.lean -= 0.04 * upLook;
   return p;
 }
-const mixLimbs = (a: Limb, b: Limb, k: number): Limb => ({
-  pitch: lerp(a.pitch, b.pitch, k),
-  roll: lerp(a.roll, b.roll, k),
-  bend: lerp(a.bend, b.bend, k),
-});
-
 function heroEyes(t: number): Eyes {
   const e: Eyes = { ...EYES_DEFAULT };
   e.blink = blinkAt(t, [1.6, 5.4, 8.9, 11.4, 15.6, 19.3, 22.6, 24.4, 29.4, 45.1, 47.6, 50.6]);
@@ -360,11 +333,6 @@ function saviorAt(t: number): SaviorState {
 // ---------------------------------------------------------------------
 // КАМЕРА
 // ---------------------------------------------------------------------
-const headOf = (p: Pose, scale = 1): V3 => pointOf(rigMatrices(p, scale).head) as V3;
-const handOf = (p: Pose, scale = 1): V3 => pointOf(rigMatrices(p, scale).handR) as V3;
-
-type Shot = { from: number; to: number; cam: (t: number) => CameraState; blend?: number };
-
 function shots(vertical: boolean): Shot[] {
   const V = vertical;
   const ots = (t: number): CameraState => {
@@ -550,17 +518,7 @@ function shots(vertical: boolean): Shot[] {
 }
 
 function camera(t: number, vertical: boolean): CameraState {
-  const list = shots(vertical);
-  const i = Math.max(0, list.findIndex((s) => t >= s.from && t < s.to));
-  const cur = list[i];
-  const c = cur.cam(t);
-  // мягкая склейка с предыдущим планом (если задан blend)
-  if (cur.blend && i > 0 && t < cur.from + cur.blend) {
-    const prev = list[i - 1].cam(t);
-    const k = inOut(clamp((t - cur.from) / cur.blend));
-    return { pos: lerp3(prev.pos, c.pos, k), target: lerp3(prev.target, c.target, k), fov: lerp(prev.fov, c.fov, k), roll: lerp(prev.roll ?? 0, c.roll ?? 0, k) };
-  }
-  return c;
+  return shotCamera(shots(vertical), t);
 }
 
 // ---------------------------------------------------------------------

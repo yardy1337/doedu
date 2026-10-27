@@ -10,6 +10,17 @@ export type Eyes = {
   squeeze: number; // 0..1 — зажмурился (дуги)
   openL: number; // 1 — открыт; можно открывать по одному
   openR: number;
+  // --- мимика (серия 2+). Не задано — лицо как в серии 1 ---
+  /** прищур недоверия: глаза сужаются и чуть наклоняются */
+  squint?: number;
+  /** блики радости в глазах 0..1 */
+  sparkle?: number;
+  /** брови: +1 — подняты «домиком» (страх, удивление), −1 — сведены (недоверие); не задано — бровей нет */
+  brow?: number;
+  /** асимметрия бровей: + левая выше, правая ниже («бровь скептика») */
+  browAsym?: number;
+  /** улыбка 0..1 */
+  smile?: number;
 };
 export const EYES_DEFAULT: Eyes = { blink: 0, lookX: 0, lookY: 0, wide: 0, squeeze: 0, openL: 1, openR: 1 };
 
@@ -64,9 +75,11 @@ const Eye: React.FC<{ side: 1 | -1; e: Eyes; open: number }> = ({ side, e, open 
   const R = DIMS.headR;
   const yaw = side * 0.34 + e.lookX * 0.12;
   const pitch = -0.1 - e.lookY * 0.1;
-  const sy = Math.max(0.04, (1 - e.blink) * open * (1 + e.wide * 0.45));
+  const squint = e.squint ?? 0;
+  const sy = Math.max(0.04, (1 - e.blink) * open * (1 + e.wide * 0.45) * (1 - 0.62 * squint));
   const sx = 1 + e.wide * 0.3;
   const squeeze = e.squeeze > 0.5;
+  const sparkle = (e.sparkle ?? 0) * Math.min(1, sy * 1.4);
   return (
     <group rotation={[pitch, yaw, 0]}>
       <group position={[0, 0, R * 0.965]}>
@@ -76,12 +89,55 @@ const Eye: React.FC<{ side: 1 | -1; e: Eyes; open: number }> = ({ side, e, open 
             <meshStandardMaterial color={BRAND.black} roughness={0.4} />
           </mesh>
         ) : (
-          <mesh scale={[0.034 * sx, 0.054 * sy, 0.018]}>
+          <mesh scale={[0.034 * sx, 0.054 * sy, 0.018]} rotation={[0, 0, side * 0.22 * squint]}>
             <sphereGeometry args={[1, 24, 16]} />
             <meshStandardMaterial color={BRAND.black} roughness={0.25} metalness={0.1} />
           </mesh>
         )}
+        {/* блики радости */}
+        {sparkle > 0.02 && !squeeze && (
+          <>
+            <mesh position={[side * 0.011 * sx, 0.02 * sy, 0.017]} scale={0.0105 * sparkle * sx}>
+              <sphereGeometry args={[1, 10, 8]} />
+              <meshBasicMaterial color={BRAND.white} toneMapped={false} />
+            </mesh>
+            <mesh position={[-side * 0.008 * sx, -0.016 * sy, 0.017]} scale={0.0055 * sparkle * sx}>
+              <sphereGeometry args={[1, 8, 6]} />
+              <meshBasicMaterial color={BRAND.white} toneMapped={false} />
+            </mesh>
+          </>
+        )}
       </group>
+    </group>
+  );
+};
+
+/** Бровь над глазом: brow +1 — «домиком», −1 — сведена к переносице */
+const Brow: React.FC<{ side: 1 | -1; e: Eyes }> = ({ side, e }) => {
+  const R = DIMS.headR;
+  const b = (e.brow ?? 0) + side * (e.browAsym ?? 0);
+  const lift = Math.max(-0.6, Math.min(1.2, b)) * 0.07 + (e.wide ?? 0) * 0.05 - (e.squint ?? 0) * 0.04;
+  const tilt = -side * (e.brow ?? 0) * 0.38 - side * (e.squint ?? 0) * 0.15;
+  return (
+    <group rotation={[-0.46 - lift, side * 0.34 + e.lookX * 0.05, 0]}>
+      <mesh position={[0, 0, R * 0.985]} rotation={[0, 0, Math.PI / 2 + tilt]}>
+        <capsuleGeometry args={[0.0085, 0.05, 4, 8]} />
+        <meshStandardMaterial color={BRAND.black} roughness={0.4} />
+      </mesh>
+    </group>
+  );
+};
+
+/** Улыбка — дуга под глазами */
+const Smile: React.FC<{ k: number }> = ({ k }) => {
+  if (k <= 0.02) return null;
+  const R = DIMS.headR;
+  return (
+    <group rotation={[0.3, 0, 0]}>
+      <mesh position={[0, 0, R * 0.97]} rotation={[0, 0, Math.PI]} scale={[1, 0.35 + 0.65 * k, 1]}>
+        <torusGeometry args={[0.04 * (0.6 + 0.4 * k), 0.0085, 8, 20, Math.PI]} />
+        <meshStandardMaterial color={BRAND.black} roughness={0.4} />
+      </mesh>
     </group>
   );
 };
@@ -143,6 +199,13 @@ export const Stickman3D: React.FC<{
                 <>
                   <Eye side={1} e={eyes} open={eyes.openL} />
                   <Eye side={-1} e={eyes} open={eyes.openR} />
+                  {eyes.brow !== undefined && (
+                    <>
+                      <Brow side={1} e={eyes} />
+                      <Brow side={-1} e={eyes} />
+                    </>
+                  )}
+                  {eyes.smile !== undefined && <Smile k={eyes.smile} />}
                   <Sweat t={sweat} />
                 </>
               )}

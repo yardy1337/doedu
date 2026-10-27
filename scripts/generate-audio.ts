@@ -3,12 +3,16 @@
  *   npm run audio                    — сгенерировать недостающее
  *   npm run audio -- --force         — перегенерировать всё
  *   npm run audio -- --only=hero_01  — перегенерировать один файл
- * Пишет public/audio/*.mp3, public/audio/sfx/*.mp3 и src/episodes/audio-timing.json.
- * Реплики и звуки берутся из сценария серии (src/episodes/ep1.lines.ts).
+ *   npm run audio -- --ep=ep2        — другая серия (по умолчанию ep1)
+ *   npm run audio -- --retidy        — заново подчистить паузы/громкость готовых дублей
+ * Реплики и звуки берутся из сценария серии (src/episodes/<ep>.lines.ts).
+ * Серия 1 пишет public/audio/*.mp3, public/audio/sfx/*.mp3 и src/episodes/audio-timing.json;
+ * остальные — public/audio/<ep>/… и src/episodes/<ep>.audio-timing.json.
  */
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { LINES, SFX } from "../src/episodes/ep1.lines";
+import type { LineDef, SfxDef } from "../src/episodes/ep1.lines";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const envPath = path.join(ROOT, ".env");
@@ -29,6 +33,10 @@ const VOICES: Record<string, string> = {
 };
 const FORCE = process.argv.includes("--force");
 const ONLY = process.argv.find((a) => a.startsWith("--only="))?.slice(7);
+const RETIDY = process.argv.includes("--retidy");
+const EP = process.argv.find((a) => a.startsWith("--ep="))?.slice(5) ?? "ep1";
+const AUDIO_SUBDIR = EP === "ep1" ? "" : EP;
+const TIMING_FILE = EP === "ep1" ? "audio-timing.json" : `${EP}.audio-timing.json`;
 const API = "https://api.elevenlabs.io/v1";
 const headers = (): Record<string, string> => ({
   "Content-Type": "application/json",
@@ -88,17 +96,58 @@ async function sfx(text: string, dur: number, out: string, loop = false) {
   fs.writeFileSync(out, Buffer.from(await res.arrayBuffer()));
 }
 
+/**
+ * Подчистка дубля (только если в реплике заданы maxPause / holdBefore / loudnorm):
+ * паузы между словами длиннее maxPause сжимаются до maxPause, перед словами из holdBefore —
+ * до заданной длины (сценарная пауза), громкость выравнивается (loudnorm). Тайминги слов сдвигаются.
+ */
+function tidy(out: string, tm: Timing, l: LineDef): Timing {
+  if (!l.maxPause && !l.holdBefore && !l.loudnorm) return tm;
+  const keep: [number, number][] = [];
+  let from = 0;
+  let shift = 0;
+  const words = tm.words.map((w) => ({ ...w }));
+  for (let i = 1; i < words.length; i++) {
+    const a = tm.words[i - 1].end;
+    const b = tm.words[i].start;
+    const target = l.holdBefore?.[tm.words[i].word] ?? l.maxPause ?? Infinity;
+    if (b - a > target) {
+      const cutA = a + target / 2;
+      const cutB = b - target / 2;
+      keep.push([from, cutA]);
+      from = cutB;
+      shift += cutB - cutA;
+    }
+    words[i].start -= shift;
+    words[i].end -= shift;
+  }
+  const filters: string[] = [];
+  const parts = [...keep, [from, -1] as [number, number]];
+  parts.forEach(([a, b], i) => filters.push(`[0:a]atrim=start=${a.toFixed(3)}${b > 0 ? `:end=${b.toFixed(3)}` : ""},asetpts=PTS-STARTPTS[p${i}]`));
+  filters.push(`${parts.map((_, i) => `[p${i}]`).join("")}concat=n=${parts.length}:v=0:a=1${l.loudnorm ? ",loudnorm=I=-16:TP=-1.5:LRA=11" : ""},aresample=44100[o]`);
+  const tmp = out.replace(/\.mp3$/, ".raw.mp3");
+  fs.renameSync(out, tmp);
+  execFileSync("ffmpeg", ["-v", "error", "-y", "-i", tmp, "-filter_complex", filters.join(";"), "-map", "[o]", "-c:a", "libmp3lame", "-b:a", "160k", out]);
+  fs.unlinkSync(tmp);
+  return { duration: words.length ? words[words.length - 1].end : tm.duration - shift, words };
+}
+
 const need = (id: string, out: string) => (ONLY ? ONLY === id : FORCE || !fs.existsSync(out));
 
 async function main() {
-  const audioDir = path.join(ROOT, "public/audio");
+  const { LINES, SFX } = (await import(`../src/episodes/${EP}.lines.ts`)) as { LINES: LineDef[]; SFX: SfxDef[] };
+  const audioDir = path.join(ROOT, "public/audio", AUDIO_SUBDIR);
   fs.mkdirSync(path.join(audioDir, "sfx"), { recursive: true });
-  const timingPath = path.join(ROOT, "src/episodes/audio-timing.json");
+  const timingPath = path.join(ROOT, "src/episodes", TIMING_FILE);
   const timing: Record<string, Timing> = fs.existsSync(timingPath) ? JSON.parse(fs.readFileSync(timingPath, "utf8")) : {};
   for (const l of LINES) {
     const out = path.join(audioDir, `${l.id}.mp3`);
-    if (!need(l.id, out) && timing[l.id]) continue;
-    timing[l.id] = await tts(VOICES[l.voice], l.text, out, l.settings ?? {});
+    if (!need(l.id, out) && timing[l.id]) {
+      // --retidy: применить подчистку к уже сгенерированному дублю (без нового запроса к API)
+      if (RETIDY && timing[l.id]) timing[l.id] = tidy(out, timing[l.id], l);
+      continue;
+    }
+    timing[l.id] = tidy(out, await tts(VOICES[l.voice], l.text, out, l.settings ?? {}), l);
     fs.writeFileSync(timingPath, JSON.stringify(timing, null, 2));
     console.log(`♪ ${l.id} [${l.voice}] «${l.text}» — ${timing[l.id].duration.toFixed(2)} с`);
   }

@@ -8,7 +8,7 @@ import { CrowdPerson, Hero, Savior } from "./characters/Characters";
 import { FallingSuitcase, TowedSuitcase } from "./characters/Suitcase";
 import { Post } from "./effects/Post";
 import { Episode } from "./episodes/types";
-import { heroHandLocal } from "./episodes/ep1";
+import { handLocal } from "./characters/rig";
 import { EpisodeCard } from "./overlays/EpisodeCard";
 import { Black, Eyelids, Grain } from "./overlays/Overlays";
 import { Sparks } from "./sets/Sparks";
@@ -29,20 +29,21 @@ export const EpisodeView: React.FC<{ ep: Episode }> = ({ ep }) => {
   return (
     <AbsoluteFill style={{ background: BRAND.black }}>
       {show3D && (
+        <AbsoluteFill style={fx.offset ? { transform: `translate(${fx.offset[0]}px, ${fx.offset[1]}px)` } : undefined}>
         <ThreeCanvas width={width} height={height} shadows dpr={1} gl={{ antialias: true, powerPreference: "high-performance" }}>
           <CameraRig cam={cam} />
           <color attach="background" args={["#0b0b0b"]} />
-          <fogExp2 attach="fog" args={["#121212", 0.06]} />
+          <fogExp2 attach="fog" args={["#121212", fx.fog ?? 0.06]} />
           <ambientLight intensity={0.07} />
           <hemisphereLight args={["#d9d9d9", "#0b0b0b", 0.16]} />
           {/* контровой свет вдоль платформы — светлый ободок на персонажах */}
           <directionalLight position={[-12, 5, -7]} intensity={0.9} color="#e8e8e8" />
           <directionalLight position={[16, 5, -3]} intensity={0.6} color="#e8e8e8" />
           {fx.rimLight && <RimLight pos={fx.rimLight.pos} target={fx.rimLight.target} intensity={fx.rimLight.intensity} />}
-          <Station t={st} shadowLampX={fx.shadowLamp?.x} shadowTarget={fx.shadowLamp?.target} fogCards={ep.fogCards} cam={cam.pos} />
+          <Station t={st} shadowLampX={fx.shadowLamp?.x} shadowTarget={fx.shadowLamp?.target} fogCards={ep.fogCards} cam={cam.pos} train={!fx.hideTrain} />
           {hero.visible && (
             <Hero pose={hero.pose} eyes={hero.eyes} sweat={hero.sweat}>
-              {hero.suitcase.mode === "towed" && <TowedSuitcase wheel={[-0.2, 0, -0.62]} hand={heroHandLocal(hero.pose)} />}
+              {hero.suitcase.mode === "towed" && <TowedSuitcase wheel={[-0.2, 0, -0.62]} hand={handLocal(hero.pose)} />}
             </Hero>
           )}
           {hero.suitcase.mode === "fallen" && (
@@ -52,19 +53,25 @@ export const EpisodeView: React.FC<{ ep: Episode }> = ({ ep }) => {
             const c = ep.crowd.at(st, i);
             return c.visible ? <CrowdPerson key={i} pose={c.pose} scale={c.scale} shade={i % 3 === 0 ? "#3b3b3b" : i % 3 === 1 ? "#454545" : "#4f4f4f"} /> : null;
           })}
-          {savior.visible && <Savior pose={savior.pose} t={st} wind={savior.wind} glow={savior.glow} />}
-          <Sparks t={fx.sparksT} amount={fx.sparks} center={[9.5, 0, 0.2]} />
+          {savior.visible && (
+            <Savior pose={savior.pose} t={st} wind={savior.wind} glow={savior.glow} open={savior.open} emblem={savior.emblem} vanish={savior.vanish} />
+          )}
+          <Sparks t={fx.sparksT} amount={fx.sparks} center={fx.sparksCenter ?? [9.5, 0, 0.2]} />
+          {ep.scene?.(st, t, vertical)}
           <Post s={fx.post} />
         </ThreeCanvas>
+        </AbsoluteFill>
       )}
       <Eyelids open={fx.eyelids.open} tilt={fx.eyelids.tilt} glow={fx.eyelids.glow} />
       <Black opacity={fx.black} />
+      {!fx.card && ep.overlay?.(t, frame, vertical)}
       {fx.card && (
         <EpisodeCard
           frame={frame}
           title={ep.title}
           subtitle={ep.subtitle}
           beats={{ logo: Math.round(ep.cardBeats.logo * fps), title: Math.round(ep.cardBeats.title * fps), subtitle: Math.round(ep.cardBeats.subtitle * fps) }}
+          slogan={ep.slogan}
         />
       )}
       <Grain frame={frame} amount={fx.grain} />
