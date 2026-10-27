@@ -8,11 +8,11 @@
 //  • AUTH_SECRET живёт в настройках функции, отдельно от базы.
 // Плюс: лимиты запросов по хешу IP, блокировка после неверных паролей, проверка надёжности пароля.
 //
-// Доступ к базе — от сервисного аккаунта функции (MetadataAuthService), паролей к базе в коде нет.
+// Доступ к базе — от сервисного аккаунта функции (IAM-токен из контекста вызова), паролей к базе в коде нет.
 // Таблицы — worker/yandex/schema.sql.
 
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
-import { Driver, MetadataAuthService, TypedData, TypedValues, Types, type TableSession } from 'ydb-sdk';
+import { Driver, TokenAuthService, TypedData, TypedValues, Types, type TableSession } from 'ydb-sdk';
 
 const SESSION_DAYS_REMEMBER = 90;
 const SESSION_HOURS_SHORT = 12;
@@ -92,12 +92,37 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 // ─── База ───────────────────────────────────────────────────────────────────
+// Вход в YDB от сервисного аккаунта функции. Встроенный MetadataAuthService требует тяжёлый
+// пакет @yandex-cloud/nodejs-sdk, поэтому берём IAM-токен сами: Yandex Cloud кладёт его в контекст
+// каждого вызова (context.token), а запасной путь — служебный адрес метаданных.
+let iamToken: { value: string; exp: number } | null = null;
+
+/** Вызывается из handler при каждом запросе: свежий токен сервисного аккаунта из контекста функции. */
+export function setIamToken(token: { access_token?: string; expires_in?: number } | undefined) {
+  if (token?.access_token) iamToken = { value: token.access_token, exp: Date.now() + (token.expires_in ?? 3600) * 1000 - 60_000 };
+}
+
+async function currentIamToken(): Promise<string> {
+  if (iamToken && iamToken.exp > Date.now()) return iamToken.value;
+  const res = await fetch('http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token', {
+    headers: { 'Metadata-Flavor': 'Google' },
+  }).catch(() => null);
+  if (!res?.ok) throw new HttpError(503, 'Личный кабинет ещё не настроен: у функции нет сервисного аккаунта.');
+  const t = (await res.json()) as { access_token: string; expires_in: number };
+  setIamToken(t);
+  return t.access_token;
+}
+
+const functionAuth = {
+  getAuthMetadata: async () => new TokenAuthService(await currentIamToken()).getAuthMetadata(),
+};
+
 let driver: Driver | null = null;
 async function db(): Promise<Driver> {
   if (driver) return driver;
   const conn = process.env.YDB_CONNECTION;
   if (!conn) throw new HttpError(503, 'Личный кабинет ещё не настроен.');
-  const d = new Driver({ connectionString: conn, authService: new MetadataAuthService() });
+  const d = new Driver({ connectionString: conn, authService: functionAuth });
   if (!(await d.ready(10_000))) throw new HttpError(503, 'База данных недоступна. Попробуйте позже.');
   driver = d;
   return d;

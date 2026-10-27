@@ -4,7 +4,7 @@
 // Зачем: Cloudflare в России замедляют, а Yandex Cloud доступен и из России, и из-за рубежа (в том числе через VPN).
 
 import worker from '../src/index';
-import { handleAccount, HttpError } from './auth';
+import { handleAccount, HttpError, setIamToken } from './auth';
 
 type YcEvent = {
   httpMethod: string;
@@ -37,7 +37,8 @@ const env = {
   TP_MARKER: process.env.TP_MARKER ?? '795764',
 };
 
-export async function handler(event: YcEvent) {
+export async function handler(event: YcEvent, context?: { token?: { access_token?: string; expires_in?: number } }) {
+  setIamToken(context?.token);
   const headers = new Headers();
   for (const [k, v] of Object.entries(event.headers ?? {})) headers.set(k, v);
   // Путь: из API Gateway (/api/search) или из параметра ?path= при прямом вызове функции
@@ -66,7 +67,9 @@ export async function handler(event: YcEvent) {
     } catch (e) {
       if (e instanceof HttpError) return reply(e.status, { error: e.message });
       console.error('account error', e);
-      return reply(500, { error: 'Ошибка сервера. Попробуйте позже.' });
+      // Только тип ошибки (например, SchemeError) — без текста и данных: помогает чинить, ничего не раскрывает
+      const code = e instanceof Error ? (e.constructor?.name || e.name || 'Error') : typeof e;
+      return reply(500, { error: 'Ошибка сервера. Попробуйте позже.', code });
     }
   }
   const request = new Request(`https://api.doedu-russia.ru${path}${qs ? `?${qs}` : ''}`, { method: event.httpMethod, headers });
